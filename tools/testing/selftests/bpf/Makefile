@@ -30,7 +30,7 @@ CFLAGS += -g -rdynamic -Wall -O2 $(GENFLAGS) $(SAN_CFLAGS)		\
 LDLIBS += -lcap -lelf -lz -lrt -lpthread
 
 # Order correspond to 'make run_tests' order
-TEST_GEN_PROGS = test_verifier test_tag test_maps test_lru_map test_lpm_map test_progs \
+TEST_GEN_PROGS = test_verifier test_tag test_lru_map test_lpm_map test_progs \
 	test_verifier_log test_dev_cgroup \
 	test_sock test_sockmap get_cgroup_id_user test_socket_cookie \
 	test_cgroup_storage \
@@ -397,14 +397,14 @@ $(eval $(call DEFINE_TEST_RUNNER,test_progs,bpf_gcc))
 endif
 
 # Define test_maps test runner.
-TRUNNER_TESTS_DIR := map_tests
-TRUNNER_BPF_PROGS_DIR := progs
-TRUNNER_EXTRA_SOURCES := test_maps.c
-TRUNNER_EXTRA_FILES :=
-TRUNNER_BPF_BUILD_RULE := $$(error no BPF objects should be built)
-TRUNNER_BPF_CFLAGS :=
-$(eval $(call DEFINE_TEST_RUNNER,test_maps))
-
+#TRUNNER_TESTS_DIR := map_tests
+#TRUNNER_BPF_PROGS_DIR := progs
+#TRUNNER_EXTRA_SOURCES := test_maps.c
+#TRUNNER_EXTRA_FILES :=
+#TRUNNER_BPF_BUILD_RULE := $$(error no BPF objects should be built)
+#TRUNNER_BPF_CFLAGS :=
+#$(eval $(call DEFINE_TEST_RUNNER,test_maps))
+#
 # Define test_verifier test runner.
 # It is much simpler than test_maps/test_progs and sufficiently different from
 # them (e.g., test.h is using completely pattern), that it's worth just

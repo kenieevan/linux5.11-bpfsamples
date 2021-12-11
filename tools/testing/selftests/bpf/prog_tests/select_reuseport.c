@@ -7,6 +7,7 @@
 #include <string.h>
 #include <errno.h>
 #include <assert.h>
+#include <arpa/inet.h>
 #include <fcntl.h>
 #include <linux/bpf.h>
 #include <linux/err.h>
@@ -637,6 +638,13 @@ static void prepare_sk_fds(int type, sa_family_t family, bool inany)
 		}
 
 		err = bind(sk_fds[i], (struct sockaddr *)&srv_sa, addrlen);
+
+	        struct sockaddr_in *v4 =(struct sockaddr_in *)(&srv_sa);
+
+                printf("server %s addr %x port %d\n", 
+                      __func__,
+                     v4->sin_addr.s_addr,
+                      ntohs(v4->sin_port));
 		RET_IF(err == -1, "bind()", "sk_fds[%d] err:%d errno:%d\n",
 		       i, err, errno);
 
@@ -792,15 +800,15 @@ static void test_config(int sotype, sa_family_t family, bool inany)
 		bool no_inner_map;
 		int need_sotype;
 	} tests[] = {
-		TEST_INIT(test_err_inner_map,
-			  .no_inner_map = true),
-		TEST_INIT(test_err_skb_data),
-		TEST_INIT(test_err_sk_select_port),
+		//TEST_INIT(test_err_inner_map,
+		//	  .no_inner_map = true),
+	//	TEST_INIT(test_err_skb_data),
+	//	TEST_INIT(test_err_sk_select_port),
 		TEST_INIT(test_pass),
-		TEST_INIT(test_syncookie,
-			  .need_sotype = SOCK_STREAM),
-		TEST_INIT(test_pass_on_err),
-		TEST_INIT(test_detach_bpf),
+	//	TEST_INIT(test_syncookie,
+	//		  .need_sotype = SOCK_STREAM),
+	//	TEST_INIT(test_pass_on_err),
+	//	TEST_INIT(test_detach_bpf),
 	};
 	char s[MAX_TEST_NAME];
 	const struct test *t;
