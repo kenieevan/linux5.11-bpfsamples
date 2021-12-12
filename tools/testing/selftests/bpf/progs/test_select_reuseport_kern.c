@@ -76,7 +76,7 @@ int _select_by_skb_data(struct sk_reuseport_md *reuse_md)
 	__u32 linum, index = 0, flags = 0, index_zero = 0;
 	__u32 *result_cnt, *linum_value;
 	struct data_check data_check = {};
-	struct cmd *cmd, cmd_copy;
+	//struct cmd *cmd, cmd_copy;
 	void *data, *data_end;
 	void *reuseport_array;
 	enum result result;
@@ -105,6 +105,7 @@ int _select_by_skb_data(struct sk_reuseport_md *reuse_md)
 	 * Otherwise, reuse_md->ip_protocol or
 	 * the protocol field in the iphdr can be used.
 	 */
+        int cli_port = 0;
 	if (data_check.ip_protocol == IPPROTO_TCP) {
 		struct tcphdr *th = data;
 
@@ -113,6 +114,7 @@ int _select_by_skb_data(struct sk_reuseport_md *reuse_md)
 
 		data_check.skb_ports[0] = th->source;
 		data_check.skb_ports[1] = th->dest;
+                cli_port =  bpf_htons(th->source);
                 bpf_printk("sport %d, dport %d\n", 
                       bpf_htons(th->source), 
                       bpf_htons(th->dest));
@@ -123,12 +125,12 @@ int _select_by_skb_data(struct sk_reuseport_md *reuse_md)
 			 */
 			return SK_PASS;
 
-		if ((th->doff << 2) + sizeof(*cmd) > data_check.len)
-			GOTO_DONE(DROP_ERR_SKB_DATA);
-		if (bpf_skb_load_bytes(reuse_md, th->doff << 2, &cmd_copy,
-				       sizeof(cmd_copy)))
-			GOTO_DONE(DROP_MISC);
-		cmd = &cmd_copy;
+		//if ((th->doff << 2) + sizeof(*cmd) > data_check.len)
+		//	GOTO_DONE(DROP_ERR_SKB_DATA);
+		//if (bpf_skb_load_bytes(reuse_md, th->doff << 2, &cmd_copy,
+		//		       sizeof(cmd_copy)))
+		//	GOTO_DONE(DROP_MISC);
+		//cmd = &cmd_copy;
 	}  else {
 		GOTO_DONE(DROP_MISC);
 	}
@@ -137,35 +139,11 @@ int _select_by_skb_data(struct sk_reuseport_md *reuse_md)
 	if (!reuseport_array)
 		GOTO_DONE(DROP_ERR_INNER_MAP);
 
-	index = cmd->reuseport_index;
-	index_ovr = bpf_map_lookup_elem(&tmp_index_ovr_map, &index_zero);
-	if (!index_ovr)
-		GOTO_DONE(DROP_MISC);
-
-	if (*index_ovr != -1) {
-		index = *index_ovr;
-		*index_ovr = -1;
-	}
+	index = cli_port; 
 	err = bpf_sk_select_reuseport(reuse_md, reuseport_array, &index,
 				      flags);
-	if (!err)
-		GOTO_DONE(PASS);
-
-	if (cmd->pass_on_failure)
-		GOTO_DONE(PASS_ERR_SK_SELECT_REUSEPORT);
-	else
-		GOTO_DONE(DROP_ERR_SK_SELECT_REUSEPORT);
-
 done:
-	result_cnt = bpf_map_lookup_elem(&result_map, &result);
-	if (!result_cnt)
-		return SK_DROP;
-
-	bpf_map_update_elem(&linum_map, &index_zero, &linum, BPF_ANY);
-	bpf_map_update_elem(&data_check_map, &index_zero, &data_check, BPF_ANY);
-
-	(*result_cnt)++;
-	return result < PASS ? SK_DROP : SK_PASS;
+	return SK_PASS;
 }
 
 char _license[] SEC("license") = "GPL";
