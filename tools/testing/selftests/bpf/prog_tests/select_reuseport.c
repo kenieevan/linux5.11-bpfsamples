@@ -375,17 +375,17 @@ static int send_data(int type, sa_family_t family, int i,
 	int fd, err;
 
 	fd = socket(family, type, 0);
-	RET_ERR(fd == -1, "socket()", "fd:%d errno:%d\n", fd, errno);
 
 	sa46_init_loopback(&cli_sa, family);
-        int port = 10001 + i * 10000;
-        printf("client bind %d \n", port);
+        int port = 10000 + i * 10000;
 	cli_sa.v4.sin_port = htons(port);
+        printf("client bind %d \n", port);
         err = bind(fd, (struct sockaddr *)&cli_sa, sizeof(cli_sa));
 
-        char data[100];
-	err = sendto(fd, data, 100, MSG_FASTOPEN, (struct sockaddr *)&srv_sa,
+	err = connect(fd, (struct sockaddr *)&srv_sa,
 		     sizeof(srv_sa));
+        if (err != 0)
+           printf("connect failed\n");
 	return fd;
 }
 
@@ -408,14 +408,14 @@ static void do_test(int type, sa_family_t family, int i,
 	srv_fd = sk_fds[ev.data.u32];
 	if (type == SOCK_STREAM) {
                 struct sockaddr peer;
-	        struct sockaddr_in *v4 =(struct sockaddr_in *)(&peer);
                 int len;
 		int new_fd = accept(srv_fd, &peer, &len);
-                printf("server accept fd %d , peer port %d\n",
-                      srv_fd, ntohs(v4->sin_port));
-		RET_IF(new_fd == -1, "accept(srv_fd)",
-                      "ev.data.u32:%u new_fd:%d errno:%d\n",
-                      ev.data.u32, new_fd, errno);
+	        struct sockaddr_in *v4 =(struct sockaddr_in *)(&peer);
+                printf("server accept fd %d , \
+                      peer addr %x port %d ev %d srv_fd %d \
+                      new_fd %d\n",
+                      srv_fd, ntohl(v4->sin_addr.s_addr), ntohs(v4->sin_port),
+                      ev.data.u32, srv_fd, new_fd);
 
                 close(new_fd);
         } 
