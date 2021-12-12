@@ -31,7 +31,7 @@
 
 #define TCP_SYNCOOKIE_SYSCTL "/proc/sys/net/ipv4/tcp_syncookies"
 #define TCP_FO_SYSCTL "/proc/sys/net/ipv4/tcp_fastopen"
-#define REUSEPORT_ARRAY_SIZE 32
+#define REUSEPORT_ARRAY_SIZE 3
 
 static int result_map, tmp_index_ovr_map, linum_map, data_check_map;
 static __u32 expected_results[NR_RESULTS];
@@ -153,8 +153,9 @@ static void sa46_init_loopback(union sa46 *sa, sa_family_t family)
 	sa->family = family;
 	if (sa->family == AF_INET6)
 		sa->v6.sin6_addr = in6addr_loopback;
-	else
+	else {
 		sa->v4.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        }
 }
 
 static void sa46_init_inany(union sa46 *sa, sa_family_t family)
@@ -608,10 +609,13 @@ static void prepare_sk_fds(int type, sa_family_t family, bool inany)
 	struct epoll_event ev;
 	socklen_t addrlen;
 
+	struct sockaddr_in *v4 =(struct sockaddr_in *)(&srv_sa);
 	if (inany)
 		sa46_init_inany(&srv_sa, family);
 	else
 		sa46_init_loopback(&srv_sa, family);
+	v4->sin_port = htons(8080);
+
 	addrlen = sizeof(srv_sa);
 
 	/*
@@ -620,33 +624,18 @@ static void prepare_sk_fds(int type, sa_family_t family, bool inany)
 	 */
 	for (i = first; i >= 0; i--) {
 		sk_fds[i] = socket(family, type, 0);
-		RET_IF(sk_fds[i] == -1, "socket()", "sk_fds[%d]:%d errno:%d\n",
-		       i, sk_fds[i], errno);
+
+
 		err = setsockopt(sk_fds[i], SOL_SOCKET, SO_REUSEPORT,
 				 &optval, sizeof(optval));
-		RET_IF(err == -1, "setsockopt(SO_REUSEPORT)",
-		       "sk_fds[%d] err:%d errno:%d\n",
-		       i, err, errno);
 
 		if (i == first) {
 			err = setsockopt(sk_fds[i], SOL_SOCKET,
 					 SO_ATTACH_REUSEPORT_EBPF,
 					 &select_by_skb_data_prog,
 					 sizeof(select_by_skb_data_prog));
-			RET_IF(err == -1, "setsockopt(SO_ATTACH_REUEPORT_EBPF)",
-			       "err:%d errno:%d\n", err, errno);
 		}
-
 		err = bind(sk_fds[i], (struct sockaddr *)&srv_sa, addrlen);
-
-	        struct sockaddr_in *v4 =(struct sockaddr_in *)(&srv_sa);
-
-                printf("server %s addr %x port %d\n", 
-                      __func__,
-                     v4->sin_addr.s_addr,
-                      ntohs(v4->sin_port));
-		RET_IF(err == -1, "bind()", "sk_fds[%d] err:%d errno:%d\n",
-		       i, err, errno);
 
 		if (type == SOCK_STREAM) {
 			err = listen(sk_fds[i], 10);
@@ -655,19 +644,10 @@ static void prepare_sk_fds(int type, sa_family_t family, bool inany)
 			       i, err, errno);
 		}
 
+
 		err = bpf_map_update_elem(reuseport_array, &i, &sk_fds[i],
 					  BPF_NOEXIST);
-		RET_IF(err == -1, "update_elem(reuseport_array)",
-		       "sk_fds[%d] err:%d errno:%d\n", i, err, errno);
 
-		if (i == first) {
-			socklen_t addrlen = sizeof(srv_sa);
-
-			err = getsockname(sk_fds[i], (struct sockaddr *)&srv_sa,
-					  &addrlen);
-			RET_IF(err == -1, "getsockname()",
-			       "sk_fds[%d] err:%d errno:%d\n", i, err, errno);
-		}
 	}
 
 	epfd = epoll_create(1);
