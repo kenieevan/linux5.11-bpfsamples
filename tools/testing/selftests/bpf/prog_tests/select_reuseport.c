@@ -378,10 +378,11 @@ static int send_data(int type, sa_family_t family, int i,
 	RET_ERR(fd == -1, "socket()", "fd:%d errno:%d\n", fd, errno);
 
 	sa46_init_loopback(&cli_sa, family);
-        int port = 10000 + i * 10000;
+        int port = 10001 + i * 10000;
+        printf("client bind %d \n", port);
 	cli_sa.v4.sin_port = htons(port);
-
         err = bind(fd, (struct sockaddr *)&cli_sa, sizeof(cli_sa));
+
         char data[100];
 	err = sendto(fd, data, 100, MSG_FASTOPEN, (struct sockaddr *)&srv_sa,
 		     sizeof(srv_sa));
@@ -478,7 +479,7 @@ static void prepare_sk_fds(int type, sa_family_t family, bool inany)
 			       i, err, errno);
 		}
 
-
+                printf("add array %d fd %d\n", i, sk_fds[i]);
 		err = bpf_map_update_elem(reuseport_array, &i, &sk_fds[i],
 					  BPF_NOEXIST);
 

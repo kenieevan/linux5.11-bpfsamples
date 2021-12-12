@@ -62,6 +62,14 @@ struct {
 	goto done;				\
 })
 
+/* Helper macro to print out debug messages */
+#define bpf_printk(fmt, ...)                            \
+({                                                      \
+        char ____fmt[] = fmt;                           \
+        bpf_trace_printk(____fmt, sizeof(____fmt),      \
+                         ##__VA_ARGS__);                \
+})
+
 SEC("sk_reuseport")
 int _select_by_skb_data(struct sk_reuseport_md *reuse_md)
 {
@@ -105,6 +113,9 @@ int _select_by_skb_data(struct sk_reuseport_md *reuse_md)
 
 		data_check.skb_ports[0] = th->source;
 		data_check.skb_ports[1] = th->dest;
+                bpf_printk("sport %d, dport %d\n", 
+                      bpf_htons(th->source), 
+                      bpf_htons(th->dest));
 
 		if (th->fin)
 			/* The connection is being torn down at the end of a
