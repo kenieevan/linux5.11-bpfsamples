@@ -88,14 +88,7 @@ int _select_by_skb_data(struct sk_reuseport_md *reuse_md)
 						data_check.skb_addrs, 8,
 						BPF_HDR_START_NET))
 			GOTO_DONE(DROP_MISC);
-	} else {
-		if (bpf_skb_load_bytes_relative(reuse_md,
-						offsetof(struct ipv6hdr, saddr),
-						data_check.skb_addrs, 32,
-						BPF_HDR_START_NET))
-			GOTO_DONE(DROP_MISC);
-	}
-
+	} 
 	/*
 	 * The ip_protocol could be a compile time decision
 	 * if the bpf_prog.o is dedicated to either TCP or
@@ -125,26 +118,7 @@ int _select_by_skb_data(struct sk_reuseport_md *reuse_md)
 				       sizeof(cmd_copy)))
 			GOTO_DONE(DROP_MISC);
 		cmd = &cmd_copy;
-	} else if (data_check.ip_protocol == IPPROTO_UDP) {
-		struct udphdr *uh = data;
-
-		if (uh + 1 > data_end)
-			GOTO_DONE(DROP_MISC);
-
-		data_check.skb_ports[0] = uh->source;
-		data_check.skb_ports[1] = uh->dest;
-
-		if (sizeof(struct udphdr) + sizeof(*cmd) > data_check.len)
-			GOTO_DONE(DROP_ERR_SKB_DATA);
-		if (data + sizeof(struct udphdr) + sizeof(*cmd) > data_end) {
-			if (bpf_skb_load_bytes(reuse_md, sizeof(struct udphdr),
-					       &cmd_copy, sizeof(cmd_copy)))
-				GOTO_DONE(DROP_MISC);
-			cmd = &cmd_copy;
-		} else {
-			cmd = data + sizeof(struct udphdr);
-		}
-	} else {
+	}  else {
 		GOTO_DONE(DROP_MISC);
 	}
 

@@ -271,28 +271,14 @@ static void check_data(int type, sa_family_t family, const struct cmd *cmd,
 		expected.ip_protocol = IPPROTO_UDP;
 	}
 
-	if (family == AF_INET6) {
-		expected.eth_protocol = htons(ETH_P_IPV6);
-		expected.bind_inany = !srv_sa.v6.sin6_addr.s6_addr32[3] &&
-			!srv_sa.v6.sin6_addr.s6_addr32[2] &&
-			!srv_sa.v6.sin6_addr.s6_addr32[1] &&
-			!srv_sa.v6.sin6_addr.s6_addr32[0];
+        expected.eth_protocol = htons(ETH_P_IP);
+        expected.bind_inany = !srv_sa.v4.sin_addr.s_addr;
 
-		memcpy(&expected.skb_addrs[0], cli_sa.v6.sin6_addr.s6_addr32,
-		       sizeof(cli_sa.v6.sin6_addr));
-		memcpy(&expected.skb_addrs[4], &in6addr_loopback,
-		       sizeof(in6addr_loopback));
-		expected.skb_ports[0] = cli_sa.v6.sin6_port;
-		expected.skb_ports[1] = srv_sa.v6.sin6_port;
-	} else {
-		expected.eth_protocol = htons(ETH_P_IP);
-		expected.bind_inany = !srv_sa.v4.sin_addr.s_addr;
+        expected.skb_addrs[0] = cli_sa.v4.sin_addr.s_addr;
+        expected.skb_addrs[1] = htonl(INADDR_LOOPBACK);
+        expected.skb_ports[0] = cli_sa.v4.sin_port;
+        expected.skb_ports[1] = srv_sa.v4.sin_port;
 
-		expected.skb_addrs[0] = cli_sa.v4.sin_addr.s_addr;
-		expected.skb_addrs[1] = htonl(INADDR_LOOPBACK);
-		expected.skb_ports[0] = cli_sa.v4.sin_port;
-		expected.skb_ports[1] = srv_sa.v4.sin_port;
-	}
 
 	if (memcmp(&result, &expected, offsetof(struct data_check,
 						equal_check_end))) {
@@ -382,7 +368,7 @@ static void check_results(void)
 	CHECK_FAIL(true);
 }
 
-static int send_data(int type, sa_family_t family, void *data, size_t len,
+static int send_data(int type, sa_family_t family, int i,
 		     enum result expected)
 {
 	union sa46 cli_sa;
@@ -392,19 +378,17 @@ static int send_data(int type, sa_family_t family, void *data, size_t len,
 	RET_ERR(fd == -1, "socket()", "fd:%d errno:%d\n", fd, errno);
 
 	sa46_init_loopback(&cli_sa, family);
-	err = bind(fd, (struct sockaddr *)&cli_sa, sizeof(cli_sa));
-	RET_ERR(fd == -1, "bind(cli_sa)", "err:%d errno:%d\n", err, errno);
+        int port = 10000 + i * 10000;
+	cli_sa.v4.sin_port = htons(port);
 
-	err = sendto(fd, data, len, MSG_FASTOPEN, (struct sockaddr *)&srv_sa,
+        err = bind(fd, (struct sockaddr *)&cli_sa, sizeof(cli_sa));
+        char data[100];
+	err = sendto(fd, data, 100, MSG_FASTOPEN, (struct sockaddr *)&srv_sa,
 		     sizeof(srv_sa));
-	RET_ERR(err != len && expected >= PASS,
-		"sendto()", "family:%u err:%d errno:%d expected:%d\n",
-		family, err, errno, expected);
-
 	return fd;
 }
 
-static void do_test(int type, sa_family_t family, struct cmd *cmd,
+static void do_test(int type, sa_family_t family, int i,
 		    enum result expected)
 {
 	int nev, srv_fd, cli_fd;
@@ -412,82 +396,30 @@ static void do_test(int type, sa_family_t family, struct cmd *cmd,
 	struct cmd rcv_cmd;
 	ssize_t nread;
 
-	cli_fd = send_data(type, family, cmd, cmd ? sizeof(*cmd) : 0,
+	cli_fd = send_data(type, family, i, 
 			   expected);
 	if (cli_fd < 0)
 		return;
 	nev = epoll_wait(epfd, &ev, 1, expected >= PASS ? 5 : 0);
-	RET_IF((nev <= 0 && expected >= PASS) ||
-	       (nev > 0 && expected < PASS),
-	       "nev <> expected",
-	       "nev:%d expected:%d type:%d family:%d data:(%d, %d)\n",
-	       nev, expected, type, family,
-	       cmd ? cmd->reuseport_index : -1,
-	       cmd ? cmd->pass_on_failure : -1);
-	check_results();
-	check_data(type, family, cmd, cli_fd);
 
 	if (expected < PASS)
 		return;
-
-	RET_IF(expected != PASS_ERR_SK_SELECT_REUSEPORT &&
-	       cmd->reuseport_index != ev.data.u32,
-	       "check cmd->reuseport_index",
-	       "cmd:(%u, %u) ev.data.u32:%u\n",
-	       cmd->pass_on_failure, cmd->reuseport_index, ev.data.u32);
-
 	srv_fd = sk_fds[ev.data.u32];
 	if (type == SOCK_STREAM) {
-		int new_fd = accept(srv_fd, NULL, 0);
-
+                struct sockaddr peer;
+	        struct sockaddr_in *v4 =(struct sockaddr_in *)(&peer);
+                int len;
+		int new_fd = accept(srv_fd, &peer, &len);
+                printf("server accept fd %d , peer port %d\n",
+                      srv_fd, ntohs(v4->sin_port));
 		RET_IF(new_fd == -1, "accept(srv_fd)",
-		       "ev.data.u32:%u new_fd:%d errno:%d\n",
-		       ev.data.u32, new_fd, errno);
+                      "ev.data.u32:%u new_fd:%d errno:%d\n",
+                      ev.data.u32, new_fd, errno);
 
-		nread = recv(new_fd, &rcv_cmd, sizeof(rcv_cmd), MSG_DONTWAIT);
-		RET_IF(nread != sizeof(rcv_cmd),
-		       "recv(new_fd)",
-		       "ev.data.u32:%u nread:%zd sizeof(rcv_cmd):%zu errno:%d\n",
-		       ev.data.u32, nread, sizeof(rcv_cmd), errno);
-
-		close(new_fd);
-	} else {
-		nread = recv(srv_fd, &rcv_cmd, sizeof(rcv_cmd), MSG_DONTWAIT);
-		RET_IF(nread != sizeof(rcv_cmd),
-		       "recv(sk_fds)",
-		       "ev.data.u32:%u nread:%zd sizeof(rcv_cmd):%zu errno:%d\n",
-		       ev.data.u32, nread, sizeof(rcv_cmd), errno);
-	}
+                close(new_fd);
+        } 
 
 	close(cli_fd);
-}
-
-static void test_err_inner_map(int type, sa_family_t family)
-{
-	struct cmd cmd = {
-		.reuseport_index = 0,
-		.pass_on_failure = 0,
-	};
-
-	expected_results[DROP_ERR_INNER_MAP]++;
-	do_test(type, family, &cmd, DROP_ERR_INNER_MAP);
-}
-
-static void test_err_skb_data(int type, sa_family_t family)
-{
-	expected_results[DROP_ERR_SKB_DATA]++;
-	do_test(type, family, NULL, DROP_ERR_SKB_DATA);
-}
-
-static void test_err_sk_select_port(int type, sa_family_t family)
-{
-	struct cmd cmd = {
-		.reuseport_index = REUSEPORT_ARRAY_SIZE,
-		.pass_on_failure = 0,
-	};
-
-	expected_results[DROP_ERR_SK_SELECT_REUSEPORT]++;
-	do_test(type, family, &cmd, DROP_ERR_SK_SELECT_REUSEPORT);
 }
 
 static void test_pass(int type, sa_family_t family)
@@ -498,109 +430,11 @@ static void test_pass(int type, sa_family_t family)
 	cmd.pass_on_failure = 0;
 	for (i = 0; i < REUSEPORT_ARRAY_SIZE; i++) {
 		expected_results[PASS]++;
-		cmd.reuseport_index = i;
-		do_test(type, family, &cmd, PASS);
+		do_test(type, family, i, PASS);
 	}
 }
 
-static void test_syncookie(int type, sa_family_t family)
-{
-	int err, tmp_index = 1;
-	struct cmd cmd = {
-		.reuseport_index = 0,
-		.pass_on_failure = 0,
-	};
 
-	/*
-	 * +1 for TCP-SYN and
-	 * +1 for the TCP-ACK (ack the syncookie)
-	 */
-	expected_results[PASS] += 2;
-	enable_syncookie();
-	/*
-	 * Simulate TCP-SYN and TCP-ACK are handled by two different sk:
-	 * TCP-SYN: select sk_fds[tmp_index = 1] tmp_index is from the
-	 *          tmp_index_ovr_map
-	 * TCP-ACK: select sk_fds[reuseport_index = 0] reuseport_index
-	 *          is from the cmd.reuseport_index
-	 */
-	err = bpf_map_update_elem(tmp_index_ovr_map, &index_zero,
-				  &tmp_index, BPF_ANY);
-	RET_IF(err == -1, "update_elem(tmp_index_ovr_map, 0, 1)",
-	       "err:%d errno:%d\n", err, errno);
-	do_test(type, family, &cmd, PASS);
-	err = bpf_map_lookup_elem(tmp_index_ovr_map, &index_zero,
-				  &tmp_index);
-	RET_IF(err == -1 || tmp_index != -1,
-	       "lookup_elem(tmp_index_ovr_map)",
-	       "err:%d errno:%d tmp_index:%d\n",
-	       err, errno, tmp_index);
-	disable_syncookie();
-}
-
-static void test_pass_on_err(int type, sa_family_t family)
-{
-	struct cmd cmd = {
-		.reuseport_index = REUSEPORT_ARRAY_SIZE,
-		.pass_on_failure = 1,
-	};
-
-	expected_results[PASS_ERR_SK_SELECT_REUSEPORT] += 1;
-	do_test(type, family, &cmd, PASS_ERR_SK_SELECT_REUSEPORT);
-}
-
-static void test_detach_bpf(int type, sa_family_t family)
-{
-#ifdef SO_DETACH_REUSEPORT_BPF
-	__u32 nr_run_before = 0, nr_run_after = 0, tmp, i;
-	struct epoll_event ev;
-	int cli_fd, err, nev;
-	struct cmd cmd = {};
-	int optvalue = 0;
-
-	err = setsockopt(sk_fds[0], SOL_SOCKET, SO_DETACH_REUSEPORT_BPF,
-			 &optvalue, sizeof(optvalue));
-	RET_IF(err == -1, "setsockopt(SO_DETACH_REUSEPORT_BPF)",
-	       "err:%d errno:%d\n", err, errno);
-
-	err = setsockopt(sk_fds[1], SOL_SOCKET, SO_DETACH_REUSEPORT_BPF,
-			 &optvalue, sizeof(optvalue));
-	RET_IF(err == 0 || errno != ENOENT,
-	       "setsockopt(SO_DETACH_REUSEPORT_BPF)",
-	       "err:%d errno:%d\n", err, errno);
-
-	for (i = 0; i < NR_RESULTS; i++) {
-		err = bpf_map_lookup_elem(result_map, &i, &tmp);
-		RET_IF(err == -1, "lookup_elem(result_map)",
-		       "i:%u err:%d errno:%d\n", i, err, errno);
-		nr_run_before += tmp;
-	}
-
-	cli_fd = send_data(type, family, &cmd, sizeof(cmd), PASS);
-	if (cli_fd < 0)
-		return;
-	nev = epoll_wait(epfd, &ev, 1, 5);
-	RET_IF(nev <= 0, "nev <= 0",
-	       "nev:%d expected:1 type:%d family:%d data:(0, 0)\n",
-	       nev,  type, family);
-
-	for (i = 0; i < NR_RESULTS; i++) {
-		err = bpf_map_lookup_elem(result_map, &i, &tmp);
-		RET_IF(err == -1, "lookup_elem(result_map)",
-		       "i:%u err:%d errno:%d\n", i, err, errno);
-		nr_run_after += tmp;
-	}
-
-	RET_IF(nr_run_before != nr_run_after,
-	       "nr_run_before != nr_run_after",
-	       "nr_run_before:%u nr_run_after:%u\n",
-	       nr_run_before, nr_run_after);
-
-	close(cli_fd);
-#else
-	test__skip();
-#endif
-}
 
 static void prepare_sk_fds(int type, sa_family_t family, bool inany)
 {
