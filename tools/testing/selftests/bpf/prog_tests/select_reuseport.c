@@ -841,11 +841,11 @@ static void test_all(void)
 		bool inany;
 	} configs[] = {
 		{ SOCK_STREAM, AF_INET },
-		{ SOCK_STREAM, AF_INET, BIND_INANY },
-		{ SOCK_STREAM, AF_INET6 },
-		{ SOCK_STREAM, AF_INET6, BIND_INANY },
-		{ SOCK_DGRAM, AF_INET },
-		{ SOCK_DGRAM, AF_INET6 },
+	//	{ SOCK_STREAM, AF_INET, BIND_INANY },
+	//	{ SOCK_STREAM, AF_INET6 },
+	//	{ SOCK_STREAM, AF_INET6, BIND_INANY },
+	//	{ SOCK_DGRAM, AF_INET },
+	//	{ SOCK_DGRAM, AF_INET6 },
 	};
 	const struct config *c;
 
@@ -867,6 +867,7 @@ out:
 
 void test_select_reuseport(void)
 {
+        fprintf(stdout, "%s", "jm test begins\n");
 	saved_tcp_fo = read_int_sysctl(TCP_FO_SYSCTL);
 	if (saved_tcp_fo < 0)
 		goto out;
@@ -880,8 +881,8 @@ void test_select_reuseport(void)
 		goto out;
 
 	test_map_type(BPF_MAP_TYPE_REUSEPORT_SOCKARRAY);
-	test_map_type(BPF_MAP_TYPE_SOCKMAP);
-	test_map_type(BPF_MAP_TYPE_SOCKHASH);
+	//test_map_type(BPF_MAP_TYPE_SOCKMAP);
+	//test_map_type(BPF_MAP_TYPE_SOCKHASH);
 out:
 	restore_sysctls();
 }
