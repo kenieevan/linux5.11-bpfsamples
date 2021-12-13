@@ -47,7 +47,6 @@ int _select_by_skb_data(struct sk_reuseport_md *reuse_md)
 	__u32  index = 0, flags = 0, index_zero = 0;
 	__u32 *result_cnt;
 	struct data_check data_check = {};
-	//struct cmd *cmd, cmd_copy;
 	void *data, *data_end;
 	void *reuseport_array;
 	enum result result;

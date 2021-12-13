@@ -133,16 +133,6 @@ static void sa46_init_loopback(union sa46 *sa, sa_family_t family)
         }
 }
 
-static void sa46_init_inany(union sa46 *sa, sa_family_t family)
-{
-	memset(sa, 0, sizeof(*sa));
-	sa->family = family;
-	if (sa->family == AF_INET6)
-		sa->v6.sin6_addr = in6addr_any;
-	else
-		sa->v4.sin_addr.s_addr = INADDR_ANY;
-}
-
 static int connect_srv(int type, sa_family_t family, int i,
 		     enum result expected, int port)
 {
@@ -212,22 +202,11 @@ static void prepare_sk_fds(int type, sa_family_t family, bool inany)
 	socklen_t addrlen;
 
 	struct sockaddr_in *v4 =(struct sockaddr_in *)(&srv_sa);
-	if (inany)
-		sa46_init_inany(&srv_sa, family);
-	else
-		sa46_init_loopback(&srv_sa, family);
+	sa46_init_loopback(&srv_sa, family);
 	v4->sin_port = htons(8080);
-
 	addrlen = sizeof(srv_sa);
-
-	/*
-	 * The sk_fds[] is filled from the back such that the order
-	 * is exactly opposite to the (struct sock_reuseport *)reuse->socks[].
-	 */
 	for (i = 0; i < SRVNUM; i++) {
 		sk_fds[i] = socket(family, type, 0);
-
-
 		err = setsockopt(sk_fds[i], SOL_SOCKET, SO_REUSEPORT,
 				 &optval, sizeof(optval));
                 if (err != 0) {
