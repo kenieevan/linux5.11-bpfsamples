@@ -33,7 +33,6 @@
 #define TCP_FO_SYSCTL "/proc/sys/net/ipv4/tcp_fastopen"
 #define REUSEPORT_ARRAY_SIZE 3
 
-static int  data_check_map;
 static __u32 expected_results[NR_RESULTS];
 static int sk_fds[REUSEPORT_ARRAY_SIZE];
 static int reuseport_array = -1, outer_map = -1;
@@ -119,12 +118,6 @@ static int prepare_bpf_obj(void)
 	select_by_skb_data_prog = bpf_program__fd(prog);
 	RET_ERR(select_by_skb_data_prog == -1, "get prog fd",
 		"select_by_skb_data_prog:%d\n", select_by_skb_data_prog);
-
-	map = bpf_object__find_map_by_name(obj, "data_check_map");
-	RET_ERR(!map, "find data_check_map", "!map\n");
-	data_check_map = bpf_map__fd(map);
-	RET_ERR(data_check_map == -1, "get data_check_map fd",
-		"data_check_map:%d\n", data_check_map);
 
 	return 0;
 }
