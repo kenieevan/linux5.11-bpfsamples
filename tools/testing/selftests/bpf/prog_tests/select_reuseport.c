@@ -368,18 +368,19 @@ static void check_results(void)
 	CHECK_FAIL(true);
 }
 
-static int send_data(int type, sa_family_t family, int i,
+static int connect_srv(int type, sa_family_t family, int i,
 		     enum result expected)
 {
 	union sa46 cli_sa;
 	int fd, err;
 
+	memset(&cli_sa, 0, sizeof(cli_sa));
 	fd = socket(family, type, 0);
-
-	sa46_init_loopback(&cli_sa, family);
-        int port = 10000 + i * 10000;
-	cli_sa.v4.sin_port = htons(port);
+	cli_sa.v4.sin_family = family;
+        cli_sa.v4.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        int port = 50001;
         printf("client bind %d \n", port);
+	cli_sa.v4.sin_port = htons(port);
         err = bind(fd, (struct sockaddr *)&cli_sa, sizeof(cli_sa));
 
 	err = connect(fd, (struct sockaddr *)&srv_sa,
@@ -394,52 +395,41 @@ static void do_test(int type, sa_family_t family, int i,
 {
 	int nev, srv_fd, cli_fd;
 	struct epoll_event ev;
-	struct cmd rcv_cmd;
 	ssize_t nread;
-
-	cli_fd = send_data(type, family, i, 
-			   expected);
-	if (cli_fd < 0)
-		return;
+        char *buf = "hello";
+        char clibuf[10];
+        int ret;
+	cli_fd = connect_srv(type, family, i, expected);
 	nev = epoll_wait(epfd, &ev, 1, expected >= PASS ? 5 : 0);
-
-	if (expected < PASS)
-		return;
 	srv_fd = sk_fds[ev.data.u32];
+        int new_fd;
 	if (type == SOCK_STREAM) {
-                struct sockaddr peer;
-                int len;
-		int new_fd = accept(srv_fd, &peer, &len);
-	        struct sockaddr_in *v4 =(struct sockaddr_in *)(&peer);
-                printf("server accept fd %d , \
-                      peer addr %x port %d ev %d srv_fd %d \
-                      new_fd %d\n",
-                      srv_fd, ntohl(v4->sin_addr.s_addr), ntohs(v4->sin_port),
-                      ev.data.u32, srv_fd, new_fd);
-
-                close(new_fd);
+		new_fd = accept(srv_fd, NULL, NULL);
+                printf("server fd %d,new fd %d, ev %d\n",
+                      srv_fd, new_fd, ev.data.u32);
         } 
-
-	close(cli_fd);
+        printf("write data from server to client\n");
+        write(new_fd, buf, 6);
+        read(cli_fd, clibuf, 10);
+        printf("client read data is %s \n", clibuf);
 }
-
+#define CLINUM 1
 static void test_pass(int type, sa_family_t family)
 {
 	struct cmd cmd;
 	int i;
 
 	cmd.pass_on_failure = 0;
-	for (i = 0; i < REUSEPORT_ARRAY_SIZE; i++) {
+	for (i = 0; i < CLINUM; i++) {
 		expected_results[PASS]++;
 		do_test(type, family, i, PASS);
 	}
 }
 
 
-
+#define SRVNUM 4
 static void prepare_sk_fds(int type, sa_family_t family, bool inany)
 {
-	const int first = REUSEPORT_ARRAY_SIZE - 1;
 	int i, err, optval = 1;
 	struct epoll_event ev;
 	socklen_t addrlen;
@@ -457,14 +447,14 @@ static void prepare_sk_fds(int type, sa_family_t family, bool inany)
 	 * The sk_fds[] is filled from the back such that the order
 	 * is exactly opposite to the (struct sock_reuseport *)reuse->socks[].
 	 */
-	for (i = first; i >= 0; i--) {
+	for (i = 0; i < SRVNUM; i++) {
 		sk_fds[i] = socket(family, type, 0);
 
 
 		err = setsockopt(sk_fds[i], SOL_SOCKET, SO_REUSEPORT,
 				 &optval, sizeof(optval));
 
-		if (i == first) {
+		if (i == 0) {
 			err = setsockopt(sk_fds[i], SOL_SOCKET,
 					 SO_ATTACH_REUSEPORT_EBPF,
 					 &select_by_skb_data_prog,
@@ -479,7 +469,7 @@ static void prepare_sk_fds(int type, sa_family_t family, bool inany)
 			       i, err, errno);
 		}
 
-                printf("add array %d fd %d\n", i, sk_fds[i]);
+                printf("reuseport_array[%d] fd is  %d\n", i, sk_fds[i]);
 		err = bpf_map_update_elem(reuseport_array, &i, &sk_fds[i],
 					  BPF_NOEXIST);
 
@@ -490,7 +480,7 @@ static void prepare_sk_fds(int type, sa_family_t family, bool inany)
 	       "epfd:%d errno:%d\n", epfd, errno);
 
 	ev.events = EPOLLIN;
-	for (i = 0; i < REUSEPORT_ARRAY_SIZE; i++) {
+	for (i = 0; i < SRVNUM; i++) {
 		ev.data.u32 = i;
 		err = epoll_ctl(epfd, EPOLL_CTL_ADD, sk_fds[i], &ev);
 		RET_IF(err, "epoll_ctl(EPOLL_CTL_ADD)", "sk_fds[%d]\n", i);

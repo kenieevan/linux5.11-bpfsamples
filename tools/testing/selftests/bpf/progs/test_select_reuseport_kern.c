@@ -139,7 +139,7 @@ int _select_by_skb_data(struct sk_reuseport_md *reuse_md)
 	if (!reuseport_array)
 		GOTO_DONE(DROP_ERR_INNER_MAP);
 
-	index = cli_port/10000 - 1; 
+	index = 2; 
         bpf_printk("index %d\n", index);
 	err = bpf_sk_select_reuseport(reuse_md, reuseport_array, &index,
 				      flags);
