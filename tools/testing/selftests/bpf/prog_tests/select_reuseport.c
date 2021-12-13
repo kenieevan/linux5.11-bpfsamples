@@ -369,7 +369,7 @@ static void check_results(void)
 }
 
 static int connect_srv(int type, sa_family_t family, int i,
-		     enum result expected)
+		     enum result expected, int port)
 {
 	union sa46 cli_sa;
 	int fd, err;
@@ -378,7 +378,6 @@ static int connect_srv(int type, sa_family_t family, int i,
 	fd = socket(family, type, 0);
 	cli_sa.v4.sin_family = family;
         cli_sa.v4.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        int port = 50001;
         printf("client bind %d \n", port);
 	cli_sa.v4.sin_port = htons(port);
         err = bind(fd, (struct sockaddr *)&cli_sa, sizeof(cli_sa));
@@ -396,24 +395,28 @@ static void do_test(int type, sa_family_t family, int i,
 	int nev, srv_fd, cli_fd;
 	struct epoll_event ev;
 	ssize_t nread;
-        char *buf = "hello";
+        char buf[10];
         char clibuf[10];
         int ret;
-	cli_fd = connect_srv(type, family, i, expected);
+        int port = 50000 + i;
+        sprintf(buf, "%d", port);
+        memset(clibuf, 0, sizeof clibuf);
+
+	cli_fd = connect_srv(type, family, i, expected, port);
 	nev = epoll_wait(epfd, &ev, 1, expected >= PASS ? 5 : 0);
 	srv_fd = sk_fds[ev.data.u32];
         int new_fd;
 	if (type == SOCK_STREAM) {
 		new_fd = accept(srv_fd, NULL, NULL);
-                printf("server fd %d,new fd %d, ev %d\n",
-                      srv_fd, new_fd, ev.data.u32);
+                printf("after accept server listen fd is %d, client port is %d, ev is %d \n",
+                      srv_fd, port, ev.data.u32);
         } 
-        printf("write data from server to client\n");
-        write(new_fd, buf, 6);
+        printf("test write data %s from server to client\n", buf);
+        write(new_fd, buf, 10);
         read(cli_fd, clibuf, 10);
         printf("client read data is %s \n", clibuf);
 }
-#define CLINUM 1
+#define CLINUM 2
 static void test_pass(int type, sa_family_t family)
 {
 	struct cmd cmd;
