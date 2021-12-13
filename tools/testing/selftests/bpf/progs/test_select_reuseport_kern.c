@@ -39,13 +39,6 @@ struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
 	__uint(max_entries, 1);
 	__type(key, __u32);
-	__type(value, int);
-} tmp_index_ovr_map SEC(".maps");
-
-struct {
-	__uint(type, BPF_MAP_TYPE_ARRAY);
-	__uint(max_entries, 1);
-	__type(key, __u32);
 	__type(value, __u32);
 } linum_map SEC(".maps");
 

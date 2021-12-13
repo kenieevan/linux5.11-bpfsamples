@@ -33,7 +33,7 @@
 #define TCP_FO_SYSCTL "/proc/sys/net/ipv4/tcp_fastopen"
 #define REUSEPORT_ARRAY_SIZE 3
 
-static int result_map, tmp_index_ovr_map, linum_map, data_check_map;
+static int result_map,  linum_map, data_check_map;
 static __u32 expected_results[NR_RESULTS];
 static int sk_fds[REUSEPORT_ARRAY_SIZE];
 static int reuseport_array = -1, outer_map = -1;
@@ -125,12 +125,6 @@ static int prepare_bpf_obj(void)
 	result_map = bpf_map__fd(map);
 	RET_ERR(result_map == -1, "get result_map fd",
 		"result_map:%d\n", result_map);
-
-	map = bpf_object__find_map_by_name(obj, "tmp_index_ovr_map");
-	RET_ERR(!map, "find tmp_index_ovr_map\n", "!map");
-	tmp_index_ovr_map = bpf_map__fd(map);
-	RET_ERR(tmp_index_ovr_map == -1, "get tmp_index_ovr_map fd",
-		"tmp_index_ovr_map:%d\n", tmp_index_ovr_map);
 
 	map = bpf_object__find_map_by_name(obj, "linum_map");
 	RET_ERR(!map, "find linum_map", "!map\n");
@@ -307,10 +301,6 @@ static void setup_per_test(int type, sa_family_t family, bool inany,
 	int ovr = -1, err;
 
 	prepare_sk_fds(type, family, inany);
-	err = bpf_map_update_elem(tmp_index_ovr_map, &index_zero, &ovr,
-				  BPF_ANY);
-	RET_IF(err == -1, "update_elem(tmp_index_ovr_map, 0, -1)",
-	       "err:%d errno:%d\n", err, errno);
 
 	/* Install reuseport_array to outer_map? */
 	if (no_inner_map)
