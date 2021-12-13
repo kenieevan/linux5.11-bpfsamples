@@ -33,7 +33,7 @@
 #define TCP_FO_SYSCTL "/proc/sys/net/ipv4/tcp_fastopen"
 #define REUSEPORT_ARRAY_SIZE 3
 
-static int result_map,  linum_map, data_check_map;
+static int result_map,   data_check_map;
 static __u32 expected_results[NR_RESULTS];
 static int sk_fds[REUSEPORT_ARRAY_SIZE];
 static int reuseport_array = -1, outer_map = -1;
@@ -125,12 +125,6 @@ static int prepare_bpf_obj(void)
 	result_map = bpf_map__fd(map);
 	RET_ERR(result_map == -1, "get result_map fd",
 		"result_map:%d\n", result_map);
-
-	map = bpf_object__find_map_by_name(obj, "linum_map");
-	RET_ERR(!map, "find linum_map", "!map\n");
-	linum_map = bpf_map__fd(map);
-	RET_ERR(linum_map == -1, "get linum_map fd",
-		"linum_map:%d\n", linum_map);
 
 	map = bpf_object__find_map_by_name(obj, "data_check_map");
 	RET_ERR(!map, "find data_check_map", "!map\n");
@@ -323,10 +317,6 @@ static void cleanup_per_test(bool no_inner_map)
 		RET_IF(err, "reset elem in result_map",
 		       "i:%u err:%d errno:%d\n", i, err, errno);
 	}
-
-	err = bpf_map_update_elem(linum_map, &zero, &zero, BPF_ANY);
-	RET_IF(err, "reset line number in linum_map", "err:%d errno:%d\n",
-	       err, errno);
 
 	for (i = 0; i < REUSEPORT_ARRAY_SIZE; i++)
 		close(sk_fds[i]);
