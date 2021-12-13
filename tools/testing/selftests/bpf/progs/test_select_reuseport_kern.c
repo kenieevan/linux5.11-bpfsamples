@@ -113,9 +113,11 @@ int _select_by_skb_data(struct sk_reuseport_md *reuse_md)
 		data_check.skb_ports[0] = th->source;
 		data_check.skb_ports[1] = th->dest;
                 cli_port =  bpf_htons(th->source);
+
                 bpf_printk("sport %d, dport %d\n", 
                       bpf_htons(th->source), 
                       bpf_htons(th->dest));
+
 		if (th->fin)
 			/* The connection is being torn down at the end of a
 			 * test. It can't contain a cmd, so return early.
@@ -127,7 +129,10 @@ int _select_by_skb_data(struct sk_reuseport_md *reuse_md)
 	reuseport_array = bpf_map_lookup_elem(&outer_map, &index_zero);
 	if (!reuseport_array)
 		GOTO_DONE(DROP_ERR_INNER_MAP);
-        index = cli_port - 50000;
+        if (cli_port == 50000)
+           index = 1;
+        if (cli_port == 50001)
+           index = 2;
         bpf_printk("index %d\n", index);
 	err = bpf_sk_select_reuseport(reuse_md, reuseport_array, &index,
 				      flags);

@@ -456,7 +456,16 @@ static void prepare_sk_fds(int type, sa_family_t family, bool inany)
 
 		err = setsockopt(sk_fds[i], SOL_SOCKET, SO_REUSEPORT,
 				 &optval, sizeof(optval));
-
+                if (err != 0) {
+                   printf("set SO_REUSEPORT failed\n");
+                   exit(-1);
+                }
+                int enable = 1;
+                err = setsockopt(sk_fds[i], SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int));
+                if (err != 0) {
+                        printf("set SO_REUSEADDR failed\n");
+                        exit(-1);
+                }
 		if (i == 0) {
 			err = setsockopt(sk_fds[i], SOL_SOCKET,
 					 SO_ATTACH_REUSEPORT_EBPF,
@@ -464,7 +473,10 @@ static void prepare_sk_fds(int type, sa_family_t family, bool inany)
 					 sizeof(select_by_skb_data_prog));
 		}
 		err = bind(sk_fds[i], (struct sockaddr *)&srv_sa, addrlen);
-
+                if (err != 0) { 
+                   printf("server socket bind failed\n");
+                   exit(-1);
+                }
 		if (type == SOCK_STREAM) {
 			err = listen(sk_fds[i], 10);
 			RET_IF(err == -1, "listen()",
