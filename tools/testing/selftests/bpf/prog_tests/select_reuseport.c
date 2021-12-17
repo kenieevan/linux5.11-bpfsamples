@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
 /* Copyright (c) 2018 Facebook */
 
+#define __USE_GNU  
+#define _GNU_SOURCE
+#include <sched.h>
+#include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdbool.h>
@@ -193,12 +198,6 @@ static void test_pass(int type, sa_family_t family)
 		do_test(type, family, i, PASS);
 	}
 }
-#define __USE_GNU  
-#include <sched.h>
-#include <pthread.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <errno.h>
 void * thread_fn(void *arg)
 {
    int s;
