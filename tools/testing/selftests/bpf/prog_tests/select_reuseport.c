@@ -193,8 +193,47 @@ static void test_pass(int type, sa_family_t family)
 		do_test(type, family, i, PASS);
 	}
 }
+#define __USE_GNU  
+#include <sched.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+void * thread_fn(void *arg)
+{
+   int s;
+   cpu_set_t cpuset;
+   pthread_t thread;
+   int id = (int)arg;
+   thread = pthread_self();
+   CPU_ZERO(&cpuset);
+   CPU_SET(id, &cpuset);
+   printf("set id %d\n", id);
+   s = pthread_setaffinity_np(thread, sizeof(cpuset), &cpuset);
+   if (s != 0) {
+      printf("set affinity failed\n");
+      exit(-1);
+   }
 
-#define SRVNUM 4
+   /* Check the actual affinity mask assigned to the thread */
+   s = pthread_getaffinity_np(thread, sizeof(cpuset), &cpuset);
+   if (s != 0) {
+      printf("get affinity failed\n");
+      exit(-1);
+   }
+
+   printf("Set returned by pthread_getaffinity_np() contained:\n");
+   for (int j = 0; j < 8; j++)
+      if (CPU_ISSET(j, &cpuset))
+         printf("    CPU %d\n", j);
+   // set cpu affinity
+   // bind socket
+   // add to array
+   return NULL;
+}
+
+#define SRVNUM 2
+pthread_t tid[SRVNUM];
 static void prepare_sk_fds(int type, sa_family_t family, bool inany)
 {
 	int i, err, optval = 1;
@@ -206,6 +245,12 @@ static void prepare_sk_fds(int type, sa_family_t family, bool inany)
 	v4->sin_port = htons(8080);
 	addrlen = sizeof(srv_sa);
 	for (i = 0; i < SRVNUM; i++) {
+             err = pthread_create(&tid[i], NULL, thread_fn, (void *)i);
+             if (err != 0) {
+                printf("create pthread failed %d\n", i);
+                return;
+             }
+
 		sk_fds[i] = socket(family, type, 0);
 		err = setsockopt(sk_fds[i], SOL_SOCKET, SO_REUSEPORT,
 				 &optval, sizeof(optval));
@@ -241,7 +286,7 @@ static void prepare_sk_fds(int type, sa_family_t family, bool inany)
 		err = bpf_map_update_elem(reuseport_array, &i, &sk_fds[i],
 					  BPF_NOEXIST);
 
-	}
+        }
 
 	epfd = epoll_create(1);
 	RET_IF(epfd == -1, "epoll_create(1)",

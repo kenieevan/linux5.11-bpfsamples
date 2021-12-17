@@ -84,9 +84,11 @@ int _select_by_skb_data(struct sk_reuseport_md *reuse_md)
 		data_check.skb_ports[1] = th->dest;
                 cli_port =  bpf_htons(th->source);
 
-                bpf_printk("sport %d, dport %d\n", 
+                bpf_printk("sport %d, dport %d cpuid: %d\n", 
                       bpf_htons(th->source), 
-                      bpf_htons(th->dest));
+                      bpf_htons(th->dest),
+                      bpf_get_smp_processor_id()
+                      );
 
 		if (th->fin)
 			/* The connection is being torn down at the end of a
