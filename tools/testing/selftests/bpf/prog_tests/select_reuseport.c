@@ -36,16 +36,14 @@
 
 #define TCP_SYNCOOKIE_SYSCTL "/proc/sys/net/ipv4/tcp_syncookies"
 #define TCP_FO_SYSCTL "/proc/sys/net/ipv4/tcp_fastopen"
-#define REUSEPORT_ARRAY_SIZE 3
+#define REUSEPORT_ARRAY_SIZE 2
 
 static __u32 expected_results[NR_RESULTS];
 static int sk_fds[REUSEPORT_ARRAY_SIZE];
 static int reuseport_array = -1, outer_map = -1;
 static enum bpf_map_type inner_map_type;
 static int select_by_skb_data_prog;
-static int saved_tcp_syncookie = -1;
 static struct bpf_object *obj;
-static int saved_tcp_fo = -1;
 static __u32 index_zero;
 static int epfd;
 
@@ -139,7 +137,7 @@ static void sa46_init_loopback(union sa46 *sa, sa_family_t family)
 }
 
 static int connect_srv(int type, sa_family_t family, int i,
-		     enum result expected, int port)
+		     enum result expected)
 {
 	union sa46 cli_sa;
 	int fd, err;
@@ -148,8 +146,6 @@ static int connect_srv(int type, sa_family_t family, int i,
 	fd = socket(family, type, 0);
 	cli_sa.v4.sin_family = family;
         cli_sa.v4.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        printf("client bind %d \n", port);
-	cli_sa.v4.sin_port = htons(port);
         err = bind(fd, (struct sockaddr *)&cli_sa, sizeof(cli_sa));
 
 	err = connect(fd, (struct sockaddr *)&srv_sa,
@@ -162,149 +158,129 @@ static int connect_srv(int type, sa_family_t family, int i,
 static void do_test(int type, sa_family_t family, int i,
 		    enum result expected)
 {
-	int nev, srv_fd, cli_fd;
-	struct epoll_event ev;
-	ssize_t nread;
+	int cli_fd;
+	//ssize_t nread;
         char buf[10];
-        char clibuf[10];
-        int ret;
-        int port = 50000 + i;
-        sprintf(buf, "%d", port);
-        memset(clibuf, 0, sizeof clibuf);
+        memset(buf, 0, sizeof buf);
 
-	cli_fd = connect_srv(type, family, i, expected, port);
-	nev = epoll_wait(epfd, &ev, 1, expected >= PASS ? 5 : 0);
-	srv_fd = sk_fds[ev.data.u32];
-        int new_fd;
-	if (type == SOCK_STREAM) {
-		new_fd = accept(srv_fd, NULL, NULL);
-                printf("after accept server listen fd is %d, client port is %d, ev is %d \n",
-                      srv_fd, port, ev.data.u32);
-        } 
-        printf("test write data %s from server to client\n", buf);
-        write(new_fd, buf, 10);
-        read(cli_fd, clibuf, 10);
-        printf("client read data is %s \n", clibuf);
+	cli_fd = connect_srv(type, family, i, expected);
+        printf("client write cpuid  %s to server \n", buf);
+        write(cli_fd, buf, 10);
 }
+
 #define CLINUM 2
 static void test_pass(int type, sa_family_t family)
 {
-	struct cmd cmd;
 	int i;
-
+        struct cmd cmd;
 	cmd.pass_on_failure = 0;
 	for (i = 0; i < CLINUM; i++) {
 		expected_results[PASS]++;
 		do_test(type, family, i, PASS);
 	}
 }
-void * thread_fn(void *arg)
+void * server_fn(void *arg)
 {
-   int s;
+   int ret;
+   int err;
+   int optval = 1;
    cpu_set_t cpuset;
    pthread_t thread;
-   int id = (int)arg;
+   int i = (int)arg;
    thread = pthread_self();
    CPU_ZERO(&cpuset);
-   CPU_SET(id, &cpuset);
-   printf("set id %d\n", id);
-   s = pthread_setaffinity_np(thread, sizeof(cpuset), &cpuset);
-   if (s != 0) {
+   CPU_SET(i, &cpuset);
+   printf("set id %d\n", i);
+   ret = pthread_setaffinity_np(thread, sizeof(cpuset), &cpuset);
+   if (ret != 0) {
       printf("set affinity failed\n");
       exit(-1);
    }
 
    /* Check the actual affinity mask assigned to the thread */
-   s = pthread_getaffinity_np(thread, sizeof(cpuset), &cpuset);
-   if (s != 0) {
+   ret = pthread_getaffinity_np(thread, sizeof(cpuset), &cpuset);
+   if (ret != 0) {
       printf("get affinity failed\n");
       exit(-1);
    }
-
    printf("Set returned by pthread_getaffinity_np() contained:\n");
    for (int j = 0; j < 8; j++)
       if (CPU_ISSET(j, &cpuset))
          printf("    CPU %d\n", j);
    // set cpu affinity
-   // bind socket
-   // add to array
+   sk_fds[i] = socket(AF_INET,SOCK_STREAM, 0);
+   ret = setsockopt(sk_fds[i], SOL_SOCKET, SO_REUSEPORT,
+         &optval, sizeof(optval));
+   if (ret != 0) {
+      printf("set SO_REUSEPORT failed\n");
+      exit(-1);
+   }
+   int enable = 1;
+   err = setsockopt(sk_fds[i], SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int));
+   if (err != 0) {
+      printf("set SO_REUSEADDR failed\n");
+      exit(-1);
+   }
+   if (i == 0) {
+      err = setsockopt(sk_fds[i], SOL_SOCKET,
+            SO_ATTACH_REUSEPORT_EBPF,
+            &select_by_skb_data_prog,
+            sizeof(select_by_skb_data_prog));
+   }
+   err = bind(sk_fds[i], (struct sockaddr *)&srv_sa, sizeof(srv_sa));
+   if (err != 0) { 
+      printf("server socket bind failed\n");
+      exit(-1);
+   }
+   err = listen(sk_fds[i], 10);
+   printf("reuseport_array[%d] fd is  %d\n", i, sk_fds[i]);
+   err = bpf_map_update_elem(reuseport_array, &i, &sk_fds[i],
+                             BPF_NOEXIST);
+
+   int new_fd;
+   new_fd = accept(sk_fds[i], NULL, NULL);
+   if (new_fd == -1) {
+        printf("server accept failed\n");
+        exit(-1);
+   }   
+   char buf[10];
+   memset(buf, 0, sizeof buf);
+   //read data and compare its cpuid.  
+   err = read(new_fd, buf, 10);
+   if (err == -1) {
+        printf("server read data failed\n");
+        exit(-1);
+   }
+   printf("server on cpu %d get data %s\n", i, buf);
+   // wait for the client threads to send some message.
+   sleep(100);
    return NULL;
 }
-
 #define SRVNUM 2
 pthread_t tid[SRVNUM];
-static void prepare_sk_fds(int type, sa_family_t family, bool inany)
+static void setup_server(int type, sa_family_t family, bool inany)
 {
-	int i, err, optval = 1;
-	struct epoll_event ev;
-	socklen_t addrlen;
+	int i, err;
+        struct sockaddr_in *v4 =(struct sockaddr_in *)(&srv_sa);
+        sa46_init_loopback(&srv_sa, family);
+        v4->sin_port = htons(8080);
 
-	struct sockaddr_in *v4 =(struct sockaddr_in *)(&srv_sa);
-	sa46_init_loopback(&srv_sa, family);
-	v4->sin_port = htons(8080);
-	addrlen = sizeof(srv_sa);
 	for (i = 0; i < SRVNUM; i++) {
-             err = pthread_create(&tid[i], NULL, thread_fn, (void *)i);
+             err = pthread_create(&tid[i], NULL, server_fn, (void *)i);
              if (err != 0) {
                 printf("create pthread failed %d\n", i);
                 return;
              }
 
-		sk_fds[i] = socket(family, type, 0);
-		err = setsockopt(sk_fds[i], SOL_SOCKET, SO_REUSEPORT,
-				 &optval, sizeof(optval));
-                if (err != 0) {
-                   printf("set SO_REUSEPORT failed\n");
-                   exit(-1);
-                }
-                int enable = 1;
-                err = setsockopt(sk_fds[i], SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int));
-                if (err != 0) {
-                        printf("set SO_REUSEADDR failed\n");
-                        exit(-1);
-                }
-		if (i == 0) {
-			err = setsockopt(sk_fds[i], SOL_SOCKET,
-					 SO_ATTACH_REUSEPORT_EBPF,
-					 &select_by_skb_data_prog,
-					 sizeof(select_by_skb_data_prog));
-		}
-		err = bind(sk_fds[i], (struct sockaddr *)&srv_sa, addrlen);
-                if (err != 0) { 
-                   printf("server socket bind failed\n");
-                   exit(-1);
-                }
-		if (type == SOCK_STREAM) {
-			err = listen(sk_fds[i], 10);
-			RET_IF(err == -1, "listen()",
-			       "sk_fds[%d] err:%d errno:%d\n",
-			       i, err, errno);
-		}
-
-                printf("reuseport_array[%d] fd is  %d\n", i, sk_fds[i]);
-		err = bpf_map_update_elem(reuseport_array, &i, &sk_fds[i],
-					  BPF_NOEXIST);
-
         }
-
-	epfd = epoll_create(1);
-	RET_IF(epfd == -1, "epoll_create(1)",
-	       "epfd:%d errno:%d\n", epfd, errno);
-
-	ev.events = EPOLLIN;
-	for (i = 0; i < SRVNUM; i++) {
-		ev.data.u32 = i;
-		err = epoll_ctl(epfd, EPOLL_CTL_ADD, sk_fds[i], &ev);
-		RET_IF(err, "epoll_ctl(EPOLL_CTL_ADD)", "sk_fds[%d]\n", i);
-	}
 }
 
 static void setup_per_test(int type, sa_family_t family, bool inany,
 			   bool no_inner_map)
 {
-	int ovr = -1, err;
+	int err;
 
-	prepare_sk_fds(type, family, inany);
+	setup_server(type, family, inany);
 
 	/* Install reuseport_array to outer_map? */
 	if (no_inner_map)
@@ -318,7 +294,7 @@ static void setup_per_test(int type, sa_family_t family, bool inany,
 
 static void cleanup_per_test(bool no_inner_map)
 {
-	int i, err, zero = 0;
+	int i, err;
 
 	memset(expected_results, 0, sizeof(expected_results));
 
