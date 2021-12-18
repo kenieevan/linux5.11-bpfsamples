@@ -46,12 +46,7 @@ static enum bpf_map_type inner_map_type;
 static int select_by_skb_data_prog;
 static struct bpf_object *obj;
 static __u32 index_zero;
-
-static union sa46 {
-	struct sockaddr_in6 v6;
-	struct sockaddr_in v4;
-	sa_family_t family;
-} srv_sa;
+struct sockaddr_in v4;
 
 static int create_maps(enum bpf_map_type inner_type)
 {
@@ -92,7 +87,6 @@ static int prepare_bpf_obj(void)
 {
 	struct bpf_program *prog;
 	struct bpf_map *map;
-	int err;
 
 	obj = bpf_object__open("test_select_reuseport_kern.o");
 
@@ -105,13 +99,6 @@ static int prepare_bpf_obj(void)
 	select_by_skb_data_prog = bpf_program__fd(prog);
 
 	return 0;
-}
-
-static void sa46_init_loopback(union sa46 *sa)
-{
-   memset(sa, 0, sizeof(*sa));
-   sa->family = AF_INET;
-   sa->v4.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 }
 
 void* client_fn(void *arg)
@@ -129,8 +116,6 @@ void* client_fn(void *arg)
 
    memset(buf, 0, sizeof buf);
    sprintf(buf, "%d", i);
-
-   printf("set client cpu id %d\n", i);
    ret = pthread_setaffinity_np(thread, sizeof(cpuset), &cpuset);
    if (ret != 0) {
       printf("set affinity failed\n");
@@ -143,22 +128,22 @@ void* client_fn(void *arg)
       printf("get affinity failed\n");
       exit(-1);
    }
-   printf("client Set returned by pthread_getaffinity_np() contained:\n");
    for (int j = 0; j < 8; j++)
       if (CPU_ISSET(j, &cpuset))
-         printf("    CPU %d\n", j);
+         printf("client %d starts\n", j);
 
    fd = socket(AF_INET, SOCK_STREAM, 0);
-   ret = connect(fd, (struct sockaddr *)&srv_sa,sizeof(srv_sa));
+   ret = connect(fd, (struct sockaddr *)&v4, sizeof(v4));
    if (ret != 0)
       printf("connect failed\n");
 
-   printf("client write cpuid  %s to server \n", buf);
+   printf("client %d write %s to server \n", i, buf);
    ret = write(fd, buf, 10);
    if (ret == -1) {
         printf("client writes to server failed\n");
         exit(-1);
    }
+  
    sleep(10);
    return NULL;
 }
@@ -186,7 +171,6 @@ void * server_fn(void *arg)
    thread = pthread_self();
    CPU_ZERO(&cpuset);
    CPU_SET(i, &cpuset);
-   printf("set id %d\n", i);
    ret = pthread_setaffinity_np(thread, sizeof(cpuset), &cpuset);
    if (ret != 0) {
       printf("set affinity failed\n");
@@ -199,10 +183,9 @@ void * server_fn(void *arg)
       printf("get affinity failed\n");
       exit(-1);
    }
-   printf("Set returned by pthread_getaffinity_np() contained:\n");
    for (int j = 0; j < 8; j++)
       if (CPU_ISSET(j, &cpuset))
-         printf("    CPU %d\n", j);
+         printf("server %d starts\n", j);
    // set cpu affinity
    sk_fds[i] = socket(AF_INET,SOCK_STREAM, 0);
    ret = setsockopt(sk_fds[i], SOL_SOCKET, SO_REUSEPORT,
@@ -223,13 +206,12 @@ void * server_fn(void *arg)
             &select_by_skb_data_prog,
             sizeof(select_by_skb_data_prog));
    }
-   err = bind(sk_fds[i], (struct sockaddr *)&srv_sa, sizeof(srv_sa));
+   err = bind(sk_fds[i], (struct sockaddr *)&v4, sizeof(v4));
    if (err != 0) { 
-      printf("server socket bind failed\n");
+      printf("server %d socket bind failed %s\n", i, strerror(errno));
       exit(-1);
    }
    err = listen(sk_fds[i], 10);
-   printf("reuseport_array[%d] fd is  %d\n", i, sk_fds[i]);
    err = bpf_map_update_elem(reuseport_array, &i, &sk_fds[i],
                              BPF_NOEXIST);
 
@@ -247,17 +229,18 @@ void * server_fn(void *arg)
         printf("server read data failed\n");
         exit(-1);
    }
-   printf("server on cpu %d get data %s\n", i, buf);
+   printf("server  %d read data %s\n", i, buf);
    // wait for the client threads to send some message.
-   sleep(100);
+   sleep(20);
    return NULL;
 }
 static void setup_server()
 {
 	int i, err;
-        struct sockaddr_in *v4 =(struct sockaddr_in *)(&srv_sa);
-        sa46_init_loopback(&srv_sa);
-        v4->sin_port = htons(8080);
+        memset(&v4, 0, sizeof(v4));
+        v4.sin_family = AF_INET;
+        v4.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        v4.sin_port = htons(8080);
 
 	for (i = 0; i < SRVNUM; i++) {
              err = pthread_create(&tid[i], NULL, server_fn, (void *)i);
@@ -279,8 +262,12 @@ static void setup_test()
                 printf("update outer_map failed\n");
                 exit(-1);
         }
+        // wait for server thread to run
         sleep(2);
+
         setup_client();
+        // wait for client thread to run
+        sleep(50);
 }
 
 static void cleanup(void)
